@@ -16,6 +16,9 @@ func init() {
 	if _, err := exec.LookPath("pactl"); err != nil {
 		useAmixer = true
 	}
+	if _, err := exec.LookPath("pacmd"); err != nil {
+		useAmixer = true
+	}
 }
 
 func cmdEnv() []string {
@@ -26,17 +29,24 @@ func getVolumeCmd() []string {
 	if useAmixer {
 		return []string{"amixer", "get", "Master"}
 	}
-	return []string{"pactl", "list", "sinks"}
+	return []string{"pacmd", "list-sinks"}
 }
 
 var volumePattern = regexp.MustCompile(`\d+%`)
 
 func parseVolume(out string) (int, error) {
 	lines := strings.Split(out, "\n")
+	pa_default_sink_hooked := false
+
 	for _, line := range lines {
 		s := strings.TrimLeft(line, " \t")
+
+		if !useAmixer && strings.HasPrefix(s, "* index") {
+			pa_default_sink_hooked = true
+		}
+
 		if useAmixer && strings.Contains(s, "Playback") && strings.Contains(s, "%") ||
-			!useAmixer && strings.HasPrefix(s, "Volume:") {
+			!useAmixer && pa_default_sink_hooked && strings.HasPrefix(s, "volume:") {
 			volumeStr := volumePattern.FindString(s)
 			return strconv.Atoi(volumeStr[:len(volumeStr)-1])
 		}
@@ -48,7 +58,7 @@ func setVolumeCmd(volume int) []string {
 	if useAmixer {
 		return []string{"amixer", "set", "Master", strconv.Itoa(volume) + "%"}
 	}
-	return []string{"pactl", "set-sink-volume", "0", strconv.Itoa(volume) + "%"}
+	return []string{"pactl", "set-sink-volume", "@DEFAULT_SINK@", strconv.Itoa(volume) + "%"}
 }
 
 func increaseVolumeCmd(diff int) []string {
@@ -62,7 +72,7 @@ func increaseVolumeCmd(diff int) []string {
 	if useAmixer {
 		return []string{"amixer", "set", "Master", strconv.Itoa(diff) + "%" + sign}
 	}
-	return []string{"pactl", "--", "set-sink-volume", "0", sign + strconv.Itoa(diff) + "%"}
+	return []string{"pactl", "--", "set-sink-volume", "@DEFAULT_SINK@", sign + strconv.Itoa(diff) + "%"}
 }
 
 func getMutedCmd() []string {
@@ -92,12 +102,12 @@ func muteCmd() []string {
 	if useAmixer {
 		return []string{"amixer", "-D", "pulse", "set", "Master", "mute"}
 	}
-	return []string{"pactl", "set-sink-mute", "0", "1"}
+	return []string{"pactl", "set-sink-mute", "@DEFAULT_SINK@", "1"}
 }
 
 func unmuteCmd() []string {
 	if useAmixer {
 		return []string{"amixer", "-D", "pulse", "set", "Master", "unmute"}
 	}
-	return []string{"pactl", "set-sink-mute", "0", "0"}
+	return []string{"pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"}
 }
